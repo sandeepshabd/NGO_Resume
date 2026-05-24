@@ -1,0 +1,36 @@
+substitutions:
+  _REGION: us-central1
+  _SERVICE: skillbridge-orchestrator-agent
+  _AGENT_MODULE: agents.orchestrator.main
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:$SHORT_SHA
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:$SHORT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - $_SERVICE
+      - --image
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:$SHORT_SHA
+      - --region
+      - $_REGION
+      - --platform
+      - managed
+      - --set-env-vars
+      - AGENT_MODULE=$_AGENT_MODULE
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:$SHORT_SHA
+

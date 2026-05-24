@@ -1,0 +1,51 @@
+[
+  {
+    "name": "resume-parser-agent",
+    "description": "Extracts structured experience, education, projects, and skills from resumes.",
+    "url": "https://resume-parser-agent.example.run.app",
+    "version": "0.1.0",
+    "owner": "SkillBridge AI",
+    "capabilities": {
+      "streaming": false,
+      "task_status": true,
+      "human_approval": false,
+      "idempotent_tasks": true
+    },
+    "skills": [
+      {
+        "id": "parse_resume",
+        "name": "Parse Resume",
+        "description": "Parses resume text or document metadata into normalized profile facts."
+      }
+    ],
+    "auth": {
+      "type": "iam",
+      "audience": "skillbridge-agents"
+    }
+  },
+  {
+    "name": "skill-graph-agent",
+    "description": "Normalizes skills and maps skill gaps against target roles.",
+    "url": "https://skill-graph-agent.example.run.app",
+    "version": "0.1.0",
+    "owner": "SkillBridge AI",
+    "capabilities": {
+      "streaming": false,
+      "task_status": true,
+      "human_approval": false,
+      "idempotent_tasks": true
+    },
+    "skills": [
+      {
+        "id": "gap_analysis",
+        "name": "Skill Gap Analysis",
+        "description": "Compares candidate skills with a target role baseline."
+      }
+    ],
+    "auth": {
+      "type": "iam",
+      "audience": "skillbridge-agents"
+    }
+  }
+]
+

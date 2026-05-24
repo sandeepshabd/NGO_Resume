@@ -1,0 +1,16 @@
+metrics:
+  - name: skillbridge_agent_task_failures
+    description: Count failed agent tasks from structured logs.
+    filter: 'jsonPayload.message="task_completed" AND jsonPayload.status="failed"'
+    metricDescriptor:
+      metricKind: DELTA
+      valueType: INT64
+      unit: "1"
+  - name: skillbridge_agent_tasks_received
+    description: Count received agent tasks from structured logs.
+    filter: 'jsonPayload.message="task_received"'
+    metricDescriptor:
+      metricKind: DELTA
+      valueType: INT64
+      unit: "1"
+
