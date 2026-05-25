@@ -1,12 +1,17 @@
 from __future__ import annotations
 
+import json
 import os
+from collections.abc import AsyncIterator
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 
 from agents.orchestrator.main import handle_task as run_orchestrator
 from skillbridge_common.jobs import JobSearchRequest, USAJobsClient
-from skillbridge_common.schemas import TaskRequest
+from skillbridge_common.planner import plan_career_workflow
+from skillbridge_common.schemas import TaskRequest, WorkflowEvent
 from skillbridge_common.web import (
     ChatMessage,
     ChatRequest,
@@ -18,6 +23,17 @@ from skillbridge_common.web import (
 
 
 app = FastAPI(title="SkillBridge Web API", version="0.1.0")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        origin.strip()
+        for origin in os.getenv("CORS_ALLOW_ORIGINS", "*").split(",")
+        if origin.strip()
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 store = InMemoryUserStore()
 jobs_client = USAJobsClient()
 
@@ -105,6 +121,22 @@ async def chat(request: ChatRequest, user: UserContext = Depends(current_user)) 
     return store.save_dashboard(user.user_id, dashboard)
 
 
+@app.get("/api/chat/events")
+async def chat_events(
+    message: str,
+    target_role: str = "data analyst",
+    location: str = "Texas",
+    user_id: str = "demo-user",
+) -> StreamingResponse:
+    user = UserContext(user_id=user_id, email="demo@skillbridge.local")
+    request = ChatRequest(message=message, target_role=target_role, location=location)
+    return StreamingResponse(
+        _chat_event_stream(request, user),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
 @app.get("/api/dashboard", response_model=Dashboard)
 async def dashboard(user: UserContext = Depends(current_user)) -> Dashboard:
     return store.get_dashboard(user.user_id)
@@ -132,3 +164,80 @@ def _chat_answer(result: dict, jobs: list[dict]) -> str:
         f"Start here: {next_action} I also found {job_count} job leads for the dashboard."
     )
 
+
+async def _chat_event_stream(request: ChatRequest, user: UserContext) -> AsyncIterator[str]:
+    resume_text = request.resume_text or store.latest_resume_text(user.user_id)
+    if not resume_text:
+        yield _sse(
+            WorkflowEvent(
+                event="error",
+                message="Upload a resume or include resume text before chatting.",
+                status="failed",
+            )
+        )
+        return
+
+    plan = plan_career_workflow({"target_role": request.target_role})
+    yield _sse(WorkflowEvent(event="plan", message=plan.objective, data=plan.model_dump()))
+
+    store.append_chat(user.user_id, ChatMessage(role="user", content=request.message))
+    for step in plan.steps:
+        yield _sse(
+            WorkflowEvent(
+                event="status",
+                message=f"{step.label}: {step.reason}",
+                step_id=step.id,
+                agent=step.agent,
+                status="running",
+            )
+        )
+
+    orchestration = await run_orchestrator(
+        TaskRequest(
+            user_id_hash=user.user_id,
+            intent="career_readiness_workflow",
+            skill_id="career_readiness_workflow",
+            payload={
+                "resume_text": resume_text,
+                "target_role": request.target_role,
+                "location": request.location,
+            },
+        )
+    )
+    yield _sse(
+        WorkflowEvent(
+            event="status",
+            message="Searching USAJOBS matches.",
+            step_id="search_jobs",
+            agent="job-market-agent",
+            status="running",
+        )
+    )
+    jobs = await jobs_client.search(
+        JobSearchRequest(keyword=request.target_role, location=request.location)
+    )
+    result = orchestration.result
+    answer = _chat_answer(result, jobs)
+    store.append_chat(user.user_id, ChatMessage(role="assistant", content=answer))
+    dashboard = store.save_dashboard(
+        user.user_id,
+        Dashboard(
+            profile=result.get("profile", {}),
+            skill_graph=result.get("skill_graph", {}),
+            learning_path=result.get("learning_path", {}),
+            report=result.get("report", {}),
+            jobs=jobs,
+        ),
+    )
+    yield _sse(
+        WorkflowEvent(
+            event="complete",
+            message="Agent workflow complete.",
+            status="completed",
+            data=dashboard.model_dump(mode="json"),
+        )
+    )
+
+
+def _sse(event: WorkflowEvent) -> str:
+    return f"event: {event.event}\ndata: {json.dumps(event.model_dump(mode='json'))}\n\n"

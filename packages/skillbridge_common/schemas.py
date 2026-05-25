@@ -82,3 +82,26 @@ class RemediationAction(BaseModel):
     command_type: Literal["rollback", "feature_flag", "queue_control", "ticket", "config_pr"]
     parameters: dict[str, Any] = Field(default_factory=dict)
 
+
+class WorkflowStep(BaseModel):
+    id: str
+    agent: str
+    skill_id: str
+    label: str
+    reason: str
+    status: Literal["planned", "running", "completed", "skipped", "failed"] = "planned"
+
+
+class WorkflowPlan(BaseModel):
+    id: str = Field(default_factory=lambda: f"plan_{uuid4().hex}")
+    objective: str
+    steps: list[WorkflowStep]
+
+
+class WorkflowEvent(BaseModel):
+    event: Literal["plan", "status", "complete", "error"]
+    message: str
+    step_id: str | None = None
+    agent: str | None = None
+    status: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)

@@ -10,6 +10,7 @@ from skillbridge_common.career import (
     parse_resume_text,
     write_career_report,
 )
+from skillbridge_common.planner import plan_career_workflow
 from skillbridge_common.schemas import AgentCard, AgentSkill, TaskRequest, TaskResponse, TaskStatus
 
 
@@ -55,6 +56,10 @@ async def _call_skill(
 async def handle_task(request: TaskRequest) -> TaskResponse:
     registry = AgentRegistry.from_env()
     client = A2AClient()
+    plan = plan_career_workflow(
+        request.payload,
+        available_agents=[card.name for card in registry.all_cards()],
+    )
     profile_payload = {
         "resume_text": request.payload.get("resume_text", ""),
         "candidate_name": request.payload.get("candidate_name"),
@@ -125,6 +130,7 @@ async def handle_task(request: TaskRequest) -> TaskResponse:
             "match": matching.result if matching else None,
             "learning_path": learning_result,
             "report": report_result,
+            "plan": plan.model_dump(),
             "agents_available": [card.name for card in registry.all_cards()],
             "execution_mode": "a2a" if registry.all_cards() else "local_fallback",
         },

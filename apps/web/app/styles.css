@@ -222,6 +222,27 @@ textarea {
   gap: 10px;
 }
 
+.timeline {
+  display: grid;
+  gap: 10px;
+}
+
+.event {
+  border-left: 3px solid var(--brand);
+  display: grid;
+  gap: 4px;
+  padding: 4px 0 4px 12px;
+}
+
+.event strong {
+  font-size: 13px;
+}
+
+.event span {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
 .job {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -265,4 +286,3 @@ textarea {
     border-right: 0;
   }
 }
-

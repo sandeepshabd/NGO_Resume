@@ -47,10 +47,16 @@ The public web API additionally exposes:
 - `POST /api/chat`
 - `GET /api/dashboard`
 - `GET /api/jobs`
+- `GET /api/chat/events` for Server-Sent Events workflow status
 
 Firebase Auth, Firestore, and Cloud Storage are represented behind adapters for the POC. The
 demo path uses in-memory state so the app can be shown cheaply before the Google Cloud project is
 finalized.
+
+The main orchestrator creates a workflow plan before executing. The web API streams that plan and
+subsequent agent status updates to the frontend with SSE so the user can see what the system is
+doing during resume analysis, skill-gap analysis, learning-path generation, report writing, and
+job search.
 
 `POST /tasks` accepts `TaskRequest` and returns `TaskResponse` from
 `packages/skillbridge_common/schemas.py`.

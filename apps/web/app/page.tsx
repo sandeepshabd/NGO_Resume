@@ -1,6 +1,14 @@
 "use client";
 
-import { BriefcaseBusiness, FileUp, LogIn, MessageSquare, Send, UserRound } from "lucide-react";
+import {
+  Activity,
+  BriefcaseBusiness,
+  FileUp,
+  LogIn,
+  MessageSquare,
+  Send,
+  UserRound
+} from "lucide-react";
 import { useMemo, useState } from "react";
 
 type ChatMessage = {
@@ -34,6 +42,15 @@ type Dashboard = {
   chat_history: ChatMessage[];
 };
 
+type StatusEvent = {
+  event: string;
+  message: string;
+  step_id?: string;
+  agent?: string;
+  status?: string;
+  data?: Dashboard | { steps?: Array<{ id: string; label: string; agent: string; reason: string }> };
+};
+
 const emptyDashboard: Dashboard = {
   profile: {},
   skill_graph: {},
@@ -53,6 +70,7 @@ export default function Home() {
   const [message, setMessage] = useState("What should I do next to become job-ready?");
   const [dashboard, setDashboard] = useState<Dashboard>(emptyDashboard);
   const [status, setStatus] = useState("Ready");
+  const [events, setEvents] = useState<StatusEvent[]>([]);
 
   const authHeader = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
@@ -81,18 +99,46 @@ export default function Home() {
   }
 
   async function sendChat() {
-    setStatus("Running agents...");
-    const response = await fetch(`${apiBase}/api/chat`, {
-      method: "POST",
-      headers: { ...authHeader, "Content-Type": "application/json" },
-      body: JSON.stringify({ message, resume_text: resumeText, target_role: targetRole, location })
-    });
-    if (!response.ok) {
-      setStatus(await response.text());
-      return;
+    setStatus("Planning agent workflow...");
+    setEvents([]);
+    if (resumeText.trim()) {
+      await uploadResume();
     }
-    setDashboard(await response.json());
-    setStatus("Agent workflow complete");
+    const params = new URLSearchParams({
+      message,
+      target_role: targetRole,
+      location,
+      user_id: token
+    });
+    const source = new EventSource(`${apiBase}/api/chat/events?${params.toString()}`);
+
+    source.addEventListener("plan", (event) => {
+      const parsed = JSON.parse((event as MessageEvent).data) as StatusEvent;
+      setEvents((current) => [...current, parsed]);
+      setStatus("Main agent created a plan");
+    });
+    source.addEventListener("status", (event) => {
+      const parsed = JSON.parse((event as MessageEvent).data) as StatusEvent;
+      setEvents((current) => [...current, parsed]);
+      setStatus(parsed.message);
+    });
+    source.addEventListener("complete", (event) => {
+      const parsed = JSON.parse((event as MessageEvent).data) as StatusEvent;
+      setEvents((current) => [...current, parsed]);
+      setDashboard(parsed.data as Dashboard);
+      setStatus("Agent workflow complete");
+      source.close();
+    });
+    source.addEventListener("error", (event) => {
+      if ("data" in event && event.data) {
+        const parsed = JSON.parse((event as MessageEvent).data) as StatusEvent;
+        setEvents((current) => [...current, parsed]);
+        setStatus(parsed.message);
+      } else {
+        setStatus("Workflow stream interrupted");
+      }
+      source.close();
+    });
   }
 
   const gaps = dashboard.skill_graph.skill_gaps || [];
@@ -182,6 +228,21 @@ export default function Home() {
 
           <div className="panel">
             <h3>
+              <Activity size={18} />
+              Agent status
+            </h3>
+            <div className="timeline">
+              {events.map((item, index) => (
+                <div className="event" key={`${item.event}-${item.step_id || index}`}>
+                  <strong>{item.agent || item.event}</strong>
+                  <span>{item.message}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel">
+            <h3>
               <BriefcaseBusiness size={18} />
               USAJOBS matches
             </h3>
@@ -212,4 +273,3 @@ export default function Home() {
     </main>
   );
 }
-

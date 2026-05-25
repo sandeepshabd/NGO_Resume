@@ -55,6 +55,7 @@ The web API calls USAJOBS when these are configured:
 ```text
 USAJOBS_EMAIL=...
 USAJOBS_API_KEY=...
+CORS_ALLOW_ORIGINS=https://skillbridge-web-...run.app
 ```
 
 Without those values, it returns demo jobs so the dashboard still works.

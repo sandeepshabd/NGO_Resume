@@ -50,3 +50,23 @@ def test_jobs_endpoint_returns_demo_source(monkeypatch) -> None:
     assert response.status_code == 200
     assert response.json()["source"] == "demo"
 
+
+def test_chat_events_streams_plan_and_complete(monkeypatch) -> None:
+    monkeypatch.setenv("AGENT_REGISTRY_JSON", "[]")
+    client = TestClient(app)
+    client.post(
+        "/api/resumes",
+        files={"file": ("resume.txt", b"Jane Doe\nPython SQL Excel project work.", "text/plain")},
+    )
+
+    with client.stream(
+        "GET",
+        "/api/chat/events?message=What%20next&target_role=data%20analyst&location=Texas",
+    ) as response:
+        body = "".join(response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: plan" in body
+    assert "event: status" in body
+    assert "event: complete" in body
+    assert "Agent workflow complete" in body
