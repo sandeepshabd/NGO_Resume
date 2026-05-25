@@ -1,5 +1,5 @@
 substitutions:
-  _REGION: us-central1
+  _REGION: us-south1
   _SERVICE: skillbridge-orchestrator-agent
   _AGENT_MODULE: agents.orchestrator.main
 

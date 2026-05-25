@@ -12,12 +12,19 @@ steps:
       - NEXT_PUBLIC_API_BASE_URL=$_NEXT_PUBLIC_API_BASE_URL
       - -t
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:$SHORT_SHA
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:latest
       - .
 
   - name: gcr.io/cloud-builders/docker
     args:
       - push
       - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:$SHORT_SHA
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:latest
 
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk
     entrypoint: gcloud
@@ -35,4 +42,5 @@ steps:
 
 images:
   - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:$SHORT_SHA
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:latest
 

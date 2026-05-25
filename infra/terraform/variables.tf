@@ -6,7 +6,7 @@ variable "project_id" {
 variable "region" {
   type        = string
   description = "Google Cloud region for Cloud Run and Artifact Registry."
-  default     = "us-central1"
+  default     = "us-south1"
 }
 
 variable "agent_token_secret_id" {
