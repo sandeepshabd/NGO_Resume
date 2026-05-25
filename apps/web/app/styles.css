@@ -44,6 +44,11 @@ button {
   padding: 0 14px;
 }
 
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
 button.primary {
   background: var(--brand);
   border-color: var(--brand);
@@ -126,6 +131,57 @@ textarea {
 .status {
   color: var(--muted);
   font-size: 13px;
+}
+
+.status-card {
+  align-items: flex-start;
+  background: #f8fafc;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 18px 1fr;
+  padding: 10px 12px;
+}
+
+.status-card svg {
+  margin-top: 1px;
+}
+
+.status-card strong,
+.status-card span {
+  display: block;
+}
+
+.status-card strong {
+  font-size: 13px;
+}
+
+.status-card span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.status-card.pending {
+  border-color: #9bbbd0;
+}
+
+.status-card.success {
+  background: var(--good);
+  border-color: #aadbbf;
+  color: var(--good-text);
+}
+
+.status-card.error {
+  background: #ffe7e5;
+  border-color: #f1aaa4;
+  color: #8a231b;
+}
+
+.status-card.compact {
+  background: #fff;
 }
 
 .toolbar {
@@ -227,6 +283,11 @@ textarea {
   gap: 10px;
 }
 
+.empty {
+  color: var(--muted);
+  font-size: 13px;
+}
+
 .event {
   border-left: 3px solid var(--brand);
   display: grid;
@@ -241,6 +302,11 @@ textarea {
 .event span {
   color: var(--muted);
   line-height: 1.4;
+}
+
+.diagnostics {
+  display: grid;
+  gap: 8px;
 }
 
 .job {

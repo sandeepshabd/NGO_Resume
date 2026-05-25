@@ -2,7 +2,9 @@
 
 import {
   Activity,
+  AlertCircle,
   BriefcaseBusiness,
+  CheckCircle2,
   FileUp,
   LogIn,
   MessageSquare,
@@ -51,6 +53,12 @@ type StatusEvent = {
   data?: Dashboard | { steps?: Array<{ id: string; label: string; agent: string; reason: string }> };
 };
 
+type Diagnostic = {
+  label: string;
+  status: "pending" | "success" | "error" | "info";
+  detail: string;
+};
+
 const emptyDashboard: Dashboard = {
   profile: {},
   skill_graph: {},
@@ -70,40 +78,103 @@ export default function Home() {
   const [message, setMessage] = useState("What should I do next to become job-ready?");
   const [dashboard, setDashboard] = useState<Dashboard>(emptyDashboard);
   const [status, setStatus] = useState("Ready");
+  const [uploadStatus, setUploadStatus] = useState<Diagnostic>({
+    label: "Resume upload",
+    status: "info",
+    detail: "No resume uploaded yet"
+  });
+  const [chatStatus, setChatStatus] = useState<Diagnostic>({
+    label: "Agent workflow",
+    status: "info",
+    detail: "Waiting for a chat request"
+  });
+  const [diagnostics, setDiagnostics] = useState<Diagnostic[]>([]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [isChatting, setIsChatting] = useState(false);
   const [events, setEvents] = useState<StatusEvent[]>([]);
 
   const authHeader = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
 
   async function demoLogin() {
-    const response = await fetch(`${apiBase}/auth/demo-login`, { method: "POST" });
-    const user = await response.json();
-    setToken(user.user_id);
-    setStatus(`Signed in as ${user.email}`);
+    setDiagnostics((current) => [
+      { label: "Demo login", status: "pending", detail: "Calling /auth/demo-login" },
+      ...current
+    ]);
+    try {
+      const response = await fetch(`${apiBase}/auth/demo-login`, { method: "POST" });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const user = await response.json();
+      setToken(user.user_id);
+      setStatus(`Signed in as ${user.email}`);
+      addDiagnostic("Demo login", "success", `Signed in as ${user.email}`);
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Login failed";
+      setStatus(detail);
+      addDiagnostic("Demo login", "error", detail);
+    }
   }
 
-  async function uploadResume() {
+  async function uploadResume(): Promise<boolean> {
+    if (!resumeText.trim()) {
+      const detail = "Paste resume text before uploading.";
+      setUploadStatus({ label: "Resume upload", status: "error", detail });
+      addDiagnostic("Resume upload", "error", detail);
+      return false;
+    }
+    setIsUploading(true);
+    setUploadStatus({ label: "Resume upload", status: "pending", detail: "Uploading resume text..." });
+    addDiagnostic("Resume upload", "pending", `POST ${apiBase}/api/resumes`);
     const file = new File([resumeText], "resume.txt", { type: "text/plain" });
     const body = new FormData();
     body.append("file", file);
-    const response = await fetch(`${apiBase}/api/resumes`, {
-      method: "POST",
-      headers: authHeader,
-      body
-    });
-    if (!response.ok) {
-      setStatus(await response.text());
-      return;
+    try {
+      const response = await fetch(`${apiBase}/api/resumes`, {
+        method: "POST",
+        headers: authHeader,
+        body
+      });
+      if (!response.ok) {
+        throw new Error(await response.text());
+      }
+      const result = await response.json();
+      const detail = `Uploaded ${result.filename} (${result.resume_id})`;
+      setUploadStatus({ label: "Resume upload", status: "success", detail });
+      setStatus(detail);
+      addDiagnostic("Resume upload", "success", detail);
+      return true;
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : "Resume upload failed";
+      setUploadStatus({ label: "Resume upload", status: "error", detail });
+      setStatus(detail);
+      addDiagnostic("Resume upload", "error", detail);
+      return false;
+    } finally {
+      setIsUploading(false);
     }
-    const result = await response.json();
-    setStatus(`Uploaded ${result.filename}`);
   }
 
   async function sendChat() {
+    if (isChatting) {
+      return;
+    }
     setStatus("Planning agent workflow...");
+    setChatStatus({ label: "Agent workflow", status: "pending", detail: "Preparing chat request..." });
     setEvents([]);
     if (resumeText.trim()) {
-      await uploadResume();
+      const uploaded = await uploadResume();
+      if (!uploaded) {
+        setChatStatus({
+          label: "Agent workflow",
+          status: "error",
+          detail: "Chat stopped because resume upload failed."
+        });
+        return;
+      }
     }
+    setIsChatting(true);
+    addDiagnostic("SSE stream", "pending", "Opening /api/chat/events");
     const params = new URLSearchParams({
       message,
       target_role: targetRole,
@@ -111,22 +182,30 @@ export default function Home() {
       user_id: token
     });
     const source = new EventSource(`${apiBase}/api/chat/events?${params.toString()}`);
+    let completed = false;
 
     source.addEventListener("plan", (event) => {
       const parsed = JSON.parse((event as MessageEvent).data) as StatusEvent;
       setEvents((current) => [...current, parsed]);
       setStatus("Main agent created a plan");
+      setChatStatus({ label: "Agent workflow", status: "pending", detail: parsed.message });
+      addDiagnostic("Main agent plan", "success", parsed.message);
     });
     source.addEventListener("status", (event) => {
       const parsed = JSON.parse((event as MessageEvent).data) as StatusEvent;
       setEvents((current) => [...current, parsed]);
       setStatus(parsed.message);
+      setChatStatus({ label: "Agent workflow", status: "pending", detail: parsed.message });
     });
     source.addEventListener("complete", (event) => {
       const parsed = JSON.parse((event as MessageEvent).data) as StatusEvent;
+      completed = true;
       setEvents((current) => [...current, parsed]);
       setDashboard(parsed.data as Dashboard);
       setStatus("Agent workflow complete");
+      setChatStatus({ label: "Agent workflow", status: "success", detail: "Dashboard updated." });
+      addDiagnostic("SSE stream", "success", "Received complete event and dashboard data.");
+      setIsChatting(false);
       source.close();
     });
     source.addEventListener("error", (event) => {
@@ -134,11 +213,30 @@ export default function Home() {
         const parsed = JSON.parse((event as MessageEvent).data) as StatusEvent;
         setEvents((current) => [...current, parsed]);
         setStatus(parsed.message);
+        setChatStatus({ label: "Agent workflow", status: "error", detail: parsed.message });
+        addDiagnostic("SSE stream", "error", parsed.message);
       } else {
-        setStatus("Workflow stream interrupted");
+        const detail = completed
+          ? "Workflow stream closed after completion."
+          : "Workflow stream interrupted before completion. Check web-api Cloud Run logs.";
+        setStatus(detail);
+        setChatStatus({
+          label: "Agent workflow",
+          status: completed ? "success" : "error",
+          detail
+        });
+        addDiagnostic("SSE stream", completed ? "success" : "error", detail);
       }
+      setIsChatting(false);
       source.close();
     });
+  }
+
+  function addDiagnostic(label: string, statusValue: Diagnostic["status"], detail: string) {
+    setDiagnostics((current) => [
+      { label, status: statusValue, detail },
+      ...current.filter((item) => !(item.label === label && item.detail === detail))
+    ].slice(0, 8));
   }
 
   const gaps = dashboard.skill_graph.skill_gaps || [];
@@ -171,11 +269,13 @@ export default function Home() {
             placeholder="Paste resume text for the POC..."
           />
         </label>
-        <button onClick={uploadResume}>
+        <button disabled={isUploading} onClick={uploadResume}>
           <FileUp size={18} />
-          Upload resume
+          {isUploading ? "Uploading..." : "Upload resume"}
         </button>
-        <p className="status">{status}</p>
+        <StatusCard item={uploadStatus} />
+        <StatusCard item={chatStatus} />
+        <p className="status">Current: {status}</p>
       </aside>
 
       <section className="workspace">
@@ -220,7 +320,7 @@ export default function Home() {
             </div>
             <div className="composer">
               <input value={message} onChange={(event) => setMessage(event.target.value)} />
-              <button aria-label="Send message" onClick={sendChat}>
+              <button aria-label="Send message" disabled={isChatting} onClick={sendChat}>
                 <Send size={18} />
               </button>
             </div>
@@ -232,11 +332,25 @@ export default function Home() {
               Agent status
             </h3>
             <div className="timeline">
+              {events.length === 0 && <p className="empty">No agent events yet.</p>}
               {events.map((item, index) => (
                 <div className="event" key={`${item.event}-${item.step_id || index}`}>
                   <strong>{item.agent || item.event}</strong>
                   <span>{item.message}</span>
                 </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="panel">
+            <h3>
+              <AlertCircle size={18} />
+              Diagnostics
+            </h3>
+            <div className="diagnostics">
+              {diagnostics.length === 0 && <p className="empty">No API calls yet.</p>}
+              {diagnostics.map((item, index) => (
+                <StatusCard item={item} key={`${item.label}-${index}`} compact />
               ))}
             </div>
           </div>
@@ -271,5 +385,17 @@ export default function Home() {
         </section>
       </section>
     </main>
+  );
+}
+
+function StatusCard({ item, compact = false }: { item: Diagnostic; compact?: boolean }) {
+  return (
+    <div className={`status-card ${item.status} ${compact ? "compact" : ""}`}>
+      {item.status === "success" ? <CheckCircle2 size={16} /> : <AlertCircle size={16} />}
+      <div>
+        <strong>{item.label}</strong>
+        <span>{item.detail}</span>
+      </div>
+    </div>
   );
 }
