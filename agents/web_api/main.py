@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import AsyncIterator
+from time import perf_counter
 
 from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,7 +11,9 @@ from fastapi.responses import StreamingResponse
 
 from agents.orchestrator.main import handle_task as run_orchestrator
 from skillbridge_common.jobs import JobSearchRequest, USAJobsClient
+from skillbridge_common.logging import agent_logger, log_workflow_event
 from skillbridge_common.planner import plan_career_workflow
+from skillbridge_common.privacy import stable_hash
 from skillbridge_common.schemas import TaskRequest, WorkflowEvent
 from skillbridge_common.web import (
     ChatMessage,
@@ -36,6 +39,11 @@ app.add_middleware(
 )
 store = InMemoryUserStore()
 jobs_client = USAJobsClient()
+logger = agent_logger("skillbridge-web-api")
+
+
+def _user_trace(user: UserContext) -> str:
+    return f"user_{stable_hash(user.user_id) or 'anonymous'}"
 
 
 async def current_user(authorization: str | None = Header(default=None)) -> UserContext:
@@ -80,11 +88,23 @@ async def upload_resume(
     record = store.save_resume(
         ResumeRecord(user_id=user.user_id, filename=file.filename or "resume.txt", text=text)
     )
+    log_workflow_event(
+        logger,
+        "resume_uploaded",
+        workflow_id=record.id,
+        trace_id=record.id,
+        status="completed",
+        user_id_hash=user.user_id,
+        filename=record.filename,
+        bytes_received=len(content),
+        character_count=len(text),
+    )
     return {"resume_id": record.id, "filename": record.filename}
 
 
 @app.post("/api/chat", response_model=Dashboard)
 async def chat(request: ChatRequest, user: UserContext = Depends(current_user)) -> Dashboard:
+    start = perf_counter()
     resume_text = request.resume_text or store.latest_resume_text(user.user_id)
     if not resume_text:
         raise HTTPException(
@@ -93,6 +113,16 @@ async def chat(request: ChatRequest, user: UserContext = Depends(current_user)) 
         )
 
     store.append_chat(user.user_id, ChatMessage(role="user", content=request.message))
+    log_workflow_event(
+        logger,
+        "chat_workflow_started",
+        workflow_id=_user_trace(user),
+        trace_id=_user_trace(user),
+        status="running",
+        target_role=request.target_role,
+        location=request.location,
+        user_id_hash=user.user_id,
+    )
     orchestration = await run_orchestrator(
         TaskRequest(
             user_id_hash=user.user_id,
@@ -107,6 +137,18 @@ async def chat(request: ChatRequest, user: UserContext = Depends(current_user)) 
     )
     keyword = request.target_role or "data analyst"
     jobs = await jobs_client.search(JobSearchRequest(keyword=keyword, location=request.location))
+    log_workflow_event(
+        logger,
+        "job_search_completed",
+        workflow_id=orchestration.task_id,
+        trace_id=orchestration.trace_id,
+        step_id="search_jobs",
+        status="completed",
+        target_role=request.target_role,
+        location=request.location,
+        result_count=len(jobs),
+        source="USAJOBS" if jobs_client.configured else "demo",
+    )
     result = orchestration.result
     answer = _chat_answer(result, jobs)
     store.append_chat(user.user_id, ChatMessage(role="assistant", content=answer))
@@ -118,7 +160,18 @@ async def chat(request: ChatRequest, user: UserContext = Depends(current_user)) 
         report=result.get("report", {}),
         jobs=jobs,
     )
-    return store.save_dashboard(user.user_id, dashboard)
+    saved = store.save_dashboard(user.user_id, dashboard)
+    log_workflow_event(
+        logger,
+        "chat_workflow_completed",
+        workflow_id=orchestration.task_id,
+        trace_id=orchestration.trace_id,
+        status="completed",
+        duration_ms=int((perf_counter() - start) * 1000),
+        user_id_hash=user.user_id,
+        job_count=len(jobs),
+    )
+    return saved
 
 
 @app.get("/api/chat/events")
@@ -166,6 +219,7 @@ def _chat_answer(result: dict, jobs: list[dict]) -> str:
 
 
 async def _chat_event_stream(request: ChatRequest, user: UserContext) -> AsyncIterator[str]:
+    stream_start = perf_counter()
     resume_text = request.resume_text or store.latest_resume_text(user.user_id)
     if not resume_text:
         yield _sse(
@@ -178,10 +232,30 @@ async def _chat_event_stream(request: ChatRequest, user: UserContext) -> AsyncIt
         return
 
     plan = plan_career_workflow({"target_role": request.target_role})
+    log_workflow_event(
+        logger,
+        "sse_workflow_planned",
+        workflow_id=_user_trace(user),
+        trace_id=_user_trace(user),
+        status="planned",
+        target_role=request.target_role,
+        location=request.location,
+        user_id_hash=user.user_id,
+        step_count=len(plan.steps),
+    )
     yield _sse(WorkflowEvent(event="plan", message=plan.objective, data=plan.model_dump()))
 
     store.append_chat(user.user_id, ChatMessage(role="user", content=request.message))
     for step in plan.steps:
+        log_workflow_event(
+            logger,
+            "sse_step_emitted",
+            workflow_id=_user_trace(user),
+            trace_id=_user_trace(user),
+            step_id=step.id,
+            status="running",
+            delegated_agent=step.agent,
+        )
         yield _sse(
             WorkflowEvent(
                 event="status",
@@ -216,6 +290,16 @@ async def _chat_event_stream(request: ChatRequest, user: UserContext) -> AsyncIt
     jobs = await jobs_client.search(
         JobSearchRequest(keyword=request.target_role, location=request.location)
     )
+    log_workflow_event(
+        logger,
+        "sse_job_search_completed",
+        workflow_id=orchestration.task_id,
+        trace_id=orchestration.trace_id,
+        step_id="search_jobs",
+        status="completed",
+        result_count=len(jobs),
+        source="USAJOBS" if jobs_client.configured else "demo",
+    )
     result = orchestration.result
     answer = _chat_answer(result, jobs)
     store.append_chat(user.user_id, ChatMessage(role="assistant", content=answer))
@@ -236,6 +320,16 @@ async def _chat_event_stream(request: ChatRequest, user: UserContext) -> AsyncIt
             status="completed",
             data=dashboard.model_dump(mode="json"),
         )
+    )
+    log_workflow_event(
+        logger,
+        "sse_workflow_completed",
+        workflow_id=orchestration.task_id,
+        trace_id=orchestration.trace_id,
+        status="completed",
+        duration_ms=int((perf_counter() - stream_start) * 1000),
+        job_count=len(jobs),
+        user_id_hash=user.user_id,
     )
 
 

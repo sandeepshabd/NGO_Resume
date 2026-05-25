@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from time import perf_counter
 
 from skillbridge_common.a2a import A2AClient, AgentRegistry
 from skillbridge_common.app import create_agent_app
@@ -10,6 +11,7 @@ from skillbridge_common.career import (
     parse_resume_text,
     write_career_report,
 )
+from skillbridge_common.logging import agent_logger, log_workflow_event
 from skillbridge_common.planner import plan_career_workflow
 from skillbridge_common.schemas import AgentCard, AgentSkill, TaskRequest, TaskResponse, TaskStatus
 
@@ -26,6 +28,7 @@ CARD = AgentCard(
         )
     ],
 )
+logger = agent_logger(CARD.name)
 
 
 async def _call_skill(
@@ -38,8 +41,19 @@ async def _call_skill(
     card = registry.find_by_skill(skill_id)
     if not card:
         return None
+    start = perf_counter()
+    log_workflow_event(
+        logger,
+        "agent_step_started",
+        workflow_id=parent.task_id,
+        trace_id=parent.trace_id,
+        step_id=skill_id,
+        status="running",
+        delegated_agent=card.name,
+        payload_keys=sorted(payload.keys()),
+    )
     try:
-        return await client.send_task(
+        response = await client.send_task(
             card,
             TaskRequest(
                 user_id_hash=parent.user_id_hash,
@@ -49,16 +63,50 @@ async def _call_skill(
                 trace_id=parent.trace_id,
             ),
         )
-    except Exception:
+        log_workflow_event(
+            logger,
+            "agent_step_completed",
+            workflow_id=parent.task_id,
+            trace_id=parent.trace_id,
+            step_id=skill_id,
+            status=response.status,
+            duration_ms=int((perf_counter() - start) * 1000),
+            delegated_agent=card.name,
+        )
+        return response
+    except Exception as exc:
+        log_workflow_event(
+            logger,
+            "agent_step_failed",
+            workflow_id=parent.task_id,
+            trace_id=parent.trace_id,
+            step_id=skill_id,
+            status="failed",
+            duration_ms=int((perf_counter() - start) * 1000),
+            delegated_agent=card.name,
+            error_type=type(exc).__name__,
+        )
         return None
 
 
 async def handle_task(request: TaskRequest) -> TaskResponse:
+    workflow_start = perf_counter()
     registry = AgentRegistry.from_env()
     client = A2AClient()
     plan = plan_career_workflow(
         request.payload,
         available_agents=[card.name for card in registry.all_cards()],
+    )
+    log_workflow_event(
+        logger,
+        "workflow_planned",
+        workflow_id=request.task_id,
+        trace_id=request.trace_id,
+        status="planned",
+        step_count=len(plan.steps),
+        execution_mode="a2a" if registry.all_cards() else "local_fallback",
+        target_role=request.payload.get("target_role", "data analyst"),
+        user_id_hash=request.user_id_hash,
     )
     profile_payload = {
         "resume_text": request.payload.get("resume_text", ""),
@@ -67,6 +115,15 @@ async def handle_task(request: TaskRequest) -> TaskResponse:
     }
 
     resume = await _call_skill(registry, client, "parse_resume", request, profile_payload)
+    log_workflow_event(
+        logger,
+        "local_or_remote_step_completed",
+        workflow_id=request.task_id,
+        trace_id=request.trace_id,
+        step_id="parse_resume",
+        status="completed",
+        source="a2a" if resume else "local_fallback",
+    )
     profile = (
         resume.result
         if resume
@@ -86,6 +143,17 @@ async def handle_task(request: TaskRequest) -> TaskResponse:
         {"skills": profile.get("skills", []), "target_role": target_role},
     )
     gap_result = skill_graph.result if skill_graph else analyze_skill_gap(profile.get("skills", []), target_role)
+    log_workflow_event(
+        logger,
+        "local_or_remote_step_completed",
+        workflow_id=request.task_id,
+        trace_id=request.trace_id,
+        step_id="gap_analysis",
+        status="completed",
+        source="a2a" if skill_graph else "local_fallback",
+        skill_count=len(profile.get("skills", [])),
+        gap_count=len(gap_result.get("skill_gaps", [])),
+    )
 
     matching = await _call_skill(
         registry,
@@ -109,6 +177,16 @@ async def handle_task(request: TaskRequest) -> TaskResponse:
         gap_result.get("skill_gaps", []),
         int(request.payload.get("weeks", 8)),
     )
+    log_workflow_event(
+        logger,
+        "local_or_remote_step_completed",
+        workflow_id=request.task_id,
+        trace_id=request.trace_id,
+        step_id="build_learning_path",
+        status="completed",
+        source="a2a" if learning else "local_fallback",
+        step_count=len(learning_result.get("steps", [])),
+    )
 
     report = await _call_skill(
         registry,
@@ -118,6 +196,15 @@ async def handle_task(request: TaskRequest) -> TaskResponse:
         {"profile": profile, "gap_analysis": gap_result, "learning_path": learning_result},
     )
     report_result = report.result if report else write_career_report(profile, gap_result, learning_result)
+    log_workflow_event(
+        logger,
+        "workflow_completed",
+        workflow_id=request.task_id,
+        trace_id=request.trace_id,
+        status="completed",
+        duration_ms=int((perf_counter() - workflow_start) * 1000),
+        source="a2a" if report else "local_fallback",
+    )
 
     return TaskResponse(
         task_id=request.task_id,
