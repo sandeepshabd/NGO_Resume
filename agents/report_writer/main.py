@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from skillbridge_common.app import create_agent_app
+from skillbridge_common.career import write_career_report
+from skillbridge_common.llm import get_llm_client
 from skillbridge_common.schemas import AgentCard, AgentSkill, TaskRequest, TaskResponse, TaskStatus
 
 
@@ -20,21 +22,22 @@ CARD = AgentCard(
 
 async def handle_task(request: TaskRequest) -> TaskResponse:
     profile = request.payload.get("profile", {})
-    gaps = request.payload.get("skill_gaps", [])
+    gap_analysis = request.payload.get("gap_analysis", {"skill_gaps": request.payload.get("skill_gaps", [])})
+    learning_path = request.payload.get("learning_path")
+    report = write_career_report(profile, gap_analysis, learning_path)
+    llm = get_llm_client()
+    narrative = await llm.complete_json(
+        "Convert this structured career report into a warm concise advisor narrative.",
+        str(report),
+    )
     return TaskResponse(
         task_id=request.task_id,
         agent=CARD.name,
         status=TaskStatus.completed,
         summary="Career report drafted.",
-        result={
-            "headline": "SkillBridge AI career readiness plan",
-            "candidate": profile.get("candidate_name"),
-            "priority_gaps": gaps[:5],
-            "advisor_notes": "Review the plan with the candidate before sharing externally.",
-        },
+        result={**report, "narrative": narrative},
         trace_id=request.trace_id,
     )
 
 
 app = create_agent_app(CARD, handle_task)
-

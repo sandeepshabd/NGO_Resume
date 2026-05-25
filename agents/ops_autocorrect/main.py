@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 from skillbridge_common.app import create_agent_app
+from skillbridge_common.ops import diagnose_alert
 from skillbridge_common.schemas import (
     AgentCapabilities,
     AgentCard,
     AgentSkill,
-    RemediationAction,
     TaskRequest,
     TaskResponse,
     TaskStatus,
@@ -28,38 +28,16 @@ CARD = AgentCard(
 
 
 async def handle_task(request: TaskRequest) -> TaskResponse:
-    severity = request.payload.get("severity", "warning")
-    service = request.payload.get("service", "unknown-service")
-    actions = [
-        RemediationAction(
-            id="open_incident_ticket",
-            label=f"Open incident ticket for {service}",
-            risk="low",
-            requires_approval=False,
-            command_type="ticket",
-            parameters={"service": service, "severity": severity},
-        )
-    ]
-    if severity in {"critical", "error"}:
-        actions.append(
-            RemediationAction(
-                id="rollback_previous_revision",
-                label=f"Roll back {service} to previous healthy Cloud Run revision",
-                risk="medium",
-                requires_approval=True,
-                command_type="rollback",
-                parameters={"service": service},
-            )
-        )
+    diagnosis = diagnose_alert(request.payload)
+    needs_approval = bool(diagnosis["approval_required"])
     return TaskResponse(
         task_id=request.task_id,
         agent=CARD.name,
-        status=TaskStatus.needs_approval if any(a.requires_approval for a in actions) else TaskStatus.completed,
+        status=TaskStatus.needs_approval if needs_approval else TaskStatus.completed,
         summary="Alert diagnosis completed.",
-        result={"service": service, "severity": severity, "recommended_actions": [a.model_dump() for a in actions]},
+        result=diagnosis,
         trace_id=request.trace_id,
     )
 
 
 app = create_agent_app(CARD, handle_task)
-

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from skillbridge_common.app import create_agent_app
+from skillbridge_common.career import build_learning_path
+from skillbridge_common.llm import get_llm_client
 from skillbridge_common.schemas import AgentCard, AgentSkill, TaskRequest, TaskResponse, TaskStatus
 
 
@@ -21,23 +23,20 @@ CARD = AgentCard(
 async def handle_task(request: TaskRequest) -> TaskResponse:
     gaps = request.payload.get("skill_gaps", [])
     weeks = int(request.payload.get("weeks", 8))
-    steps = [
-        {
-            "week": index + 1,
-            "focus": gap,
-            "output": f"Complete one applied mini-project demonstrating {gap}.",
-        }
-        for index, gap in enumerate(gaps[:weeks])
-    ]
+    path = build_learning_path([str(gap) for gap in gaps], weeks)
+    llm = get_llm_client()
+    coaching_notes = await llm.complete_json(
+        "Improve this learning path with concise coaching notes.",
+        str(path),
+    )
     return TaskResponse(
         task_id=request.task_id,
         agent=CARD.name,
         status=TaskStatus.completed,
         summary="Learning path generated.",
-        result={"duration_weeks": weeks, "steps": steps},
+        result={**path, "coaching_notes": coaching_notes},
         trace_id=request.trace_id,
     )
 
 
 app = create_agent_app(CARD, handle_task)
-
