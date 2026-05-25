@@ -132,6 +132,7 @@ gcloud services enable \
   artifactregistry.googleapis.com \
   secretmanager.googleapis.com \
   logging.googleapis.com \
+  cloudtrace.googleapis.com \
   monitoring.googleapis.com \
   pubsub.googleapis.com
 ```
@@ -157,6 +158,14 @@ Allow the shared runtime identity to read it:
 gcloud secrets add-iam-policy-binding skillbridge-agent-token \
   --member="serviceAccount:${AGENT_SA}" \
   --role="roles/secretmanager.secretAccessor"
+```
+
+Allow the runtime identity to export traces:
+
+```bash
+gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+  --member="serviceAccount:${AGENT_SA}" \
+  --role="roles/cloudtrace.agent"
 ```
 
 ### 3. Create Artifact Registry
@@ -416,6 +425,45 @@ jsonPayload.event_type="agent_step_failed"
 jsonPayload.status="failed"
 severity>=ERROR
 ```
+
+### Trace UI (Service-to-Service Flow)
+
+The application emits OpenTelemetry traces to Google Cloud Trace. This is the
+recommended UI for viewing request flow across Cloud Run services.
+
+Open:
+
+```text
+Google Cloud Console -> Observability -> Trace
+```
+
+Usage:
+
+- set time range to `Last 1 hour`
+- open a trace and inspect the waterfall path and per-hop latency
+- correlate trace logs in Logs Explorer with:
+
+```text
+resource.type="cloud_run_revision"
+trace="projects/PROJECT_ID/traces/TRACE_ID"
+```
+
+Notes:
+
+- Cloud Trace shows application request flow, not packet-level network flow.
+- Timestamps in the UI follow the browser/account timezone setting.
+
+### Cloud Armor Scope
+
+Cloud Armor is not an application-code feature. It is configured at the edge
+through Google Cloud infrastructure:
+
+- External HTTP(S) Load Balancer
+- backend service mapping to Cloud Run
+- security policy rules attached to the backend service
+
+For this reason, Cloud Armor rollout is an infrastructure deployment change
+(recommended via Terraform), not a Python or Next.js code change.
 
 Examples:
 

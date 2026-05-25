@@ -43,6 +43,40 @@ Safe fields for debugging:
 
 ## Common Incident Checks
 
+### Trace Path Across Services
+
+Cloud Trace is the primary UI for service-to-service request flow.
+
+Console path:
+
+```text
+Observability -> Trace
+```
+
+Set `Last 1 hour`, then open a trace to view the waterfall timeline and
+per-service latency.
+
+To correlate a trace in logs:
+
+```bash
+gcloud logging read \
+  'resource.type="cloud_run_revision" trace="projects/'"${PROJECT_ID}"'/traces/TRACE_ID"' \
+  --limit=100 \
+  --format="table(timestamp,resource.labels.service_name,severity,textPayload)"
+```
+
+Important: trace UI time is shown in the browser/account timezone.
+
+### Cloud Armor Clarification
+
+Cloud Armor is an infrastructure control plane feature, not an app runtime
+library. Implement it through load balancer and security policy deployment.
+
+Recommended approach:
+
+- validate quickly with `gcloud` commands
+- codify final policy and LB attachment in Terraform
+
 ### Frontend Calls Localhost
 
 Symptom:
