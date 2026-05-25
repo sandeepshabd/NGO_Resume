@@ -15,6 +15,7 @@ from skillbridge_common.orchestrator_client import OrchestratorClient
 from skillbridge_common.planner import plan_career_workflow
 from skillbridge_common.privacy import stable_hash
 from skillbridge_common.schemas import TaskRequest, WorkflowEvent
+from skillbridge_common.tracing import init_tracing
 from skillbridge_common.web import (
     ChatMessage,
     ChatRequest,
@@ -26,6 +27,7 @@ from skillbridge_common.web import (
 
 
 app = FastAPI(title="SkillBridge Web API", version="0.1.0")
+init_tracing(os.getenv("K_SERVICE", "skillbridge-web-api-agent"), app)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[

@@ -7,6 +7,7 @@ from fastapi import Depends, FastAPI
 from skillbridge_common.logging import agent_logger, configure_logging, log_task_event
 from skillbridge_common.schemas import AgentCard, AgentHealth, TaskRequest, TaskResponse
 from skillbridge_common.security import require_agent_token
+from skillbridge_common.tracing import init_tracing
 
 TaskHandler = Callable[[TaskRequest], Awaitable[TaskResponse]]
 
@@ -15,6 +16,7 @@ def create_agent_app(card: AgentCard, handler: TaskHandler) -> FastAPI:
     configure_logging()
     logger = agent_logger(card.name)
     app = FastAPI(title=card.name, version=card.version)
+    init_tracing(card.name, app)
 
     @app.get("/healthz", response_model=AgentHealth)
     async def healthz() -> AgentHealth:
