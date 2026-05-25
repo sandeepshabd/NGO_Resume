@@ -41,6 +41,87 @@ Safe fields for debugging:
 5. The ops auto-correction agent diagnoses the alert.
 6. Safe remediation is applied or an approval request is created.
 
+## Common Incident Checks
+
+### Frontend Calls Localhost
+
+Symptom:
+
+```text
+Frontend API URL is not configured
+POST http://localhost:8081/api/resumes
+```
+
+Cause: the Next.js client bundle was built without `NEXT_PUBLIC_API_BASE_URL`.
+
+Fix: rebuild the frontend Docker image with:
+
+```bash
+docker build \
+  --build-arg NEXT_PUBLIC_API_BASE_URL="${WEB_API_URL}" \
+  -t "${IMAGE}" \
+  apps/web
+```
+
+### Orchestrator Cannot Parse Registry
+
+Symptom:
+
+```text
+AGENT_REGISTRY_JSON parse error
+```
+
+Cause: JSON was passed through `--set-env-vars`, which splits on commas.
+
+Fix: use an env-vars YAML file and quote the registry JSON as a string.
+
+### Agent Step Fails
+
+Start with:
+
+```bash
+gcloud logging read \
+  'resource.type="cloud_run_revision"
+   jsonPayload.event_type="agent_step_failed"' \
+  --limit=20 \
+  --format="table(timestamp,resource.labels.service_name,jsonPayload.step_id,jsonPayload.error_type,jsonPayload.duration_ms)"
+```
+
+Then inspect the target agent:
+
+```bash
+gcloud logging read \
+  'resource.type="cloud_run_revision"
+   resource.labels.service_name="skillbridge-skill-graph-agent"' \
+  --limit=50 \
+  --format=json
+```
+
+### Secret Access Fails
+
+Symptom:
+
+```text
+Permission denied on secret: skillbridge-agent-token
+```
+
+Fix:
+
+```bash
+gcloud secrets add-iam-policy-binding skillbridge-agent-token \
+  --member="serviceAccount:${AGENT_SA}" \
+  --role="roles/secretmanager.secretAccessor"
+```
+
+### Service Not Visible In Console
+
+Check the Console project and region filter. The POC uses `us-south1` by default.
+
+```bash
+gcloud config get-value project
+gcloud run services list --region us-south1
+```
+
 ## First SLOs
 
 - API availability: 99.5 percent monthly

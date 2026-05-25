@@ -12,5 +12,7 @@ COPY agents ./agents
 
 RUN pip install --no-cache-dir .
 
-CMD ["sh", "-c", "uvicorn ${AGENT_MODULE}:app --host 0.0.0.0 --port ${PORT}"]
+RUN useradd --create-home --shell /usr/sbin/nologin appuser
+USER appuser
 
+CMD ["sh", "-c", "uvicorn ${AGENT_MODULE}:app --host 0.0.0.0 --port ${PORT}"]

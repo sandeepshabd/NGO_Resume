@@ -20,6 +20,10 @@ def create_agent_app(card: AgentCard, handler: TaskHandler) -> FastAPI:
     async def healthz() -> AgentHealth:
         return AgentHealth(agent=card.name, version=card.version)
 
+    @app.get("/readyz", response_model=AgentHealth)
+    async def readyz() -> AgentHealth:
+        return AgentHealth(agent=card.name, version=card.version)
+
     @app.get("/.well-known/agent-card.json", response_model=AgentCard)
     async def agent_card() -> AgentCard:
         return card
@@ -38,4 +42,3 @@ def create_agent_app(card: AgentCard, handler: TaskHandler) -> FastAPI:
         return response
 
     return app
-
