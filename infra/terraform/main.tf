@@ -53,6 +53,7 @@ locals {
     interview_coach    = "agents.interview_coach.main"
     report_writer      = "agents.report_writer.main"
     ops_autocorrect    = "agents.ops_autocorrect.main"
+    web_api            = "agents.web_api.main"
   }
 }
 
@@ -86,4 +87,3 @@ resource "google_cloud_run_v2_service" "agents" {
     ]
   }
 }
-

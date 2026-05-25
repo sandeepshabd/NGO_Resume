@@ -6,7 +6,8 @@ deployable Cloud Run service with an A2A-style Agent Card and a single task API.
 ```mermaid
 flowchart TD
   UI[User app] --> API[API Gateway or Load Balancer]
-  API --> Main[Orchestrator Agent]
+  API --> Web[Web API]
+  Web --> Main[Orchestrator Agent]
   Main --> Registry[Agent Registry from cards]
   Main --> Resume[Resume Parser Agent]
   Main --> Skill[Skill Graph Agent]
@@ -16,6 +17,8 @@ flowchart TD
   Main --> Interview[Interview Coach Agent]
   Main --> Report[Report Writer Agent]
   Main --> Ops[Ops Auto-Correction Agent]
+  Web --> Jobs[USAJOBS API]
+  Web --> Store[Firebase Auth, Firestore, Cloud Storage]
   Resume --> Storage[MCP storage/document tools]
   Jobs --> BigQuery[MCP job market/BigQuery tools]
   Ops --> Monitoring[Cloud Logging and Monitoring]
@@ -36,6 +39,18 @@ Each service exposes:
 - `GET /healthz`
 - `GET /.well-known/agent-card.json`
 - `POST /tasks`
+
+The public web API additionally exposes:
+
+- `POST /auth/demo-login`
+- `POST /api/resumes`
+- `POST /api/chat`
+- `GET /api/dashboard`
+- `GET /api/jobs`
+
+Firebase Auth, Firestore, and Cloud Storage are represented behind adapters for the POC. The
+demo path uses in-memory state so the app can be shown cheaply before the Google Cloud project is
+finalized.
 
 `POST /tasks` accepts `TaskRequest` and returns `TaskResponse` from
 `packages/skillbridge_common/schemas.py`.
@@ -60,4 +75,3 @@ Blocked without approval:
 - deleting data
 - production database migrations
 - user-impacting recommendation policy changes
-

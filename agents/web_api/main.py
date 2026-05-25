@@ -1,0 +1,134 @@
+from __future__ import annotations
+
+import os
+
+from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, status
+
+from agents.orchestrator.main import handle_task as run_orchestrator
+from skillbridge_common.jobs import JobSearchRequest, USAJobsClient
+from skillbridge_common.schemas import TaskRequest
+from skillbridge_common.web import (
+    ChatMessage,
+    ChatRequest,
+    Dashboard,
+    InMemoryUserStore,
+    ResumeRecord,
+    UserContext,
+)
+
+
+app = FastAPI(title="SkillBridge Web API", version="0.1.0")
+store = InMemoryUserStore()
+jobs_client = USAJobsClient()
+
+
+async def current_user(authorization: str | None = Header(default=None)) -> UserContext:
+    if os.getenv("FIREBASE_AUTH_ENABLED", "false").lower() == "true":
+        if not authorization or not authorization.startswith("Bearer "):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing bearer token")
+        # Firebase Admin verification will be added when the GCP/Firebase project is selected.
+        # For the POC, the dependency keeps the public API contract stable.
+        token = authorization.removeprefix("Bearer ").strip()
+        if not token:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+        return UserContext(user_id=token[:32], auth_provider="firebase")
+
+    if authorization and authorization.startswith("Bearer "):
+        token = authorization.removeprefix("Bearer ").strip()
+        return UserContext(user_id=token or "demo-user", email="demo@skillbridge.local")
+    return UserContext(user_id="demo-user", email="demo@skillbridge.local")
+
+
+@app.get("/healthz")
+async def healthz() -> dict[str, str]:
+    return {"status": "ok", "service": "skillbridge-web-api"}
+
+
+@app.post("/auth/demo-login", response_model=UserContext)
+async def demo_login() -> UserContext:
+    return UserContext(user_id="demo-user", email="demo@skillbridge.local")
+
+
+@app.post("/api/resumes")
+async def upload_resume(
+    file: UploadFile = File(...),
+    user: UserContext = Depends(current_user),
+) -> dict[str, str]:
+    content = await file.read()
+    text = content.decode("utf-8", errors="ignore")
+    if not text.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Upload a text-based resume for the POC. PDF extraction will be added next.",
+        )
+    record = store.save_resume(
+        ResumeRecord(user_id=user.user_id, filename=file.filename or "resume.txt", text=text)
+    )
+    return {"resume_id": record.id, "filename": record.filename}
+
+
+@app.post("/api/chat", response_model=Dashboard)
+async def chat(request: ChatRequest, user: UserContext = Depends(current_user)) -> Dashboard:
+    resume_text = request.resume_text or store.latest_resume_text(user.user_id)
+    if not resume_text:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Upload a resume or include resume_text before chatting.",
+        )
+
+    store.append_chat(user.user_id, ChatMessage(role="user", content=request.message))
+    orchestration = await run_orchestrator(
+        TaskRequest(
+            user_id_hash=user.user_id,
+            intent="career_readiness_workflow",
+            skill_id="career_readiness_workflow",
+            payload={
+                "resume_text": resume_text,
+                "target_role": request.target_role,
+                "location": request.location,
+            },
+        )
+    )
+    keyword = request.target_role or "data analyst"
+    jobs = await jobs_client.search(JobSearchRequest(keyword=keyword, location=request.location))
+    result = orchestration.result
+    answer = _chat_answer(result, jobs)
+    store.append_chat(user.user_id, ChatMessage(role="assistant", content=answer))
+
+    dashboard = Dashboard(
+        profile=result.get("profile", {}),
+        skill_graph=result.get("skill_graph", {}),
+        learning_path=result.get("learning_path", {}),
+        report=result.get("report", {}),
+        jobs=jobs,
+    )
+    return store.save_dashboard(user.user_id, dashboard)
+
+
+@app.get("/api/dashboard", response_model=Dashboard)
+async def dashboard(user: UserContext = Depends(current_user)) -> Dashboard:
+    return store.get_dashboard(user.user_id)
+
+
+@app.get("/api/jobs")
+async def jobs(
+    keyword: str = "data analyst",
+    location: str = "Texas",
+    user: UserContext = Depends(current_user),
+) -> dict[str, object]:
+    del user
+    results = await jobs_client.search(JobSearchRequest(keyword=keyword, location=location))
+    return {"jobs": results, "source": "USAJOBS" if jobs_client.configured else "demo"}
+
+
+def _chat_answer(result: dict, jobs: list[dict]) -> str:
+    report = result.get("report", {})
+    gaps = report.get("priority_gaps", [])
+    next_action = report.get("next_actions", ["Start with a focused portfolio artifact."])[0]
+    job_count = len(jobs)
+    gap_text = ", ".join(gaps[:3]) if gaps else "no major role gaps found"
+    return (
+        f"I reviewed your resume against the target role. Your top gaps are {gap_text}. "
+        f"Start here: {next_action} I also found {job_count} job leads for the dashboard."
+    )
+

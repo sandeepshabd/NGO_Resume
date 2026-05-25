@@ -18,6 +18,7 @@ documents, storage, job market sources, and operations actions.
 
 ```text
 agents/                 Cloud Run service entrypoints
+apps/web/               Next.js POC frontend
 packages/               Shared A2A, MCP, schemas, logging, and security code
 infra/                  Terraform and Cloud Build templates
 docs/                   Architecture, deployment, and operations notes
@@ -32,6 +33,7 @@ python -m venv .venv
 source .venv/bin/activate
 pip install -e ".[dev]"
 uvicorn agents.orchestrator.main:app --reload --port 8080
+uvicorn agents.web_api.main:app --reload --port 8081
 ```
 
 ## Deployment
@@ -39,4 +41,3 @@ uvicorn agents.orchestrator.main:app --reload --port 8080
 Deployment is intentionally separated from this scaffold. The next step is to choose the
 Google Cloud project, region, service names, and data stores, then apply the templates in
 `infra/`.
-

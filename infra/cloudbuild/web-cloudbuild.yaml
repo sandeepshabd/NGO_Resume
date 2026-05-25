@@ -1,0 +1,38 @@
+substitutions:
+  _REGION: us-south1
+  _SERVICE: skillbridge-web
+  _NEXT_PUBLIC_API_BASE_URL: https://skillbridge-web-api.example.run.app
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    dir: apps/web
+    args:
+      - build
+      - --build-arg
+      - NEXT_PUBLIC_API_BASE_URL=$_NEXT_PUBLIC_API_BASE_URL
+      - -t
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:$SHORT_SHA
+      - .
+
+  - name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:$SHORT_SHA
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk
+    entrypoint: gcloud
+    args:
+      - run
+      - deploy
+      - $_SERVICE
+      - --image
+      - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:$SHORT_SHA
+      - --region
+      - $_REGION
+      - --platform
+      - managed
+      - --allow-unauthenticated
+
+images:
+  - ${_REGION}-docker.pkg.dev/$PROJECT_ID/skillbridge/$_SERVICE:$SHORT_SHA
+
