@@ -24,6 +24,9 @@ infra/                  Terraform and Cloud Build templates
 docs/                   Architecture, deployment, and operations notes
 ```
 
+See `docs/agent-deployment-model.md` for the POC deployment model: separate Cloud Run services,
+one shared runtime service account, A2A Agent Card registry, and optional MCP tool services.
+
 ## Local Commands
 
 These commands are provided for later. They have not been run by Codex.

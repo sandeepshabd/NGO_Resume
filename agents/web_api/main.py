@@ -9,9 +9,9 @@ from fastapi import Depends, FastAPI, File, Header, HTTPException, UploadFile, s
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-from agents.orchestrator.main import handle_task as run_orchestrator
 from skillbridge_common.jobs import JobSearchRequest, USAJobsClient
 from skillbridge_common.logging import agent_logger, log_workflow_event
+from skillbridge_common.orchestrator_client import OrchestratorClient
 from skillbridge_common.planner import plan_career_workflow
 from skillbridge_common.privacy import stable_hash
 from skillbridge_common.schemas import TaskRequest, WorkflowEvent
@@ -39,6 +39,7 @@ app.add_middleware(
 )
 store = InMemoryUserStore()
 jobs_client = USAJobsClient()
+orchestrator_client = OrchestratorClient()
 logger = agent_logger("skillbridge-web-api")
 
 
@@ -123,7 +124,7 @@ async def chat(request: ChatRequest, user: UserContext = Depends(current_user)) 
         location=request.location,
         user_id_hash=user.user_id,
     )
-    orchestration = await run_orchestrator(
+    orchestration = await orchestrator_client.run_career_workflow(
         TaskRequest(
             user_id_hash=user.user_id,
             intent="career_readiness_workflow",
@@ -170,6 +171,7 @@ async def chat(request: ChatRequest, user: UserContext = Depends(current_user)) 
         duration_ms=int((perf_counter() - start) * 1000),
         user_id_hash=user.user_id,
         job_count=len(jobs),
+        orchestrator_mode="remote" if orchestrator_client.remote_enabled else "local",
     )
     return saved
 
@@ -266,7 +268,7 @@ async def _chat_event_stream(request: ChatRequest, user: UserContext) -> AsyncIt
             )
         )
 
-    orchestration = await run_orchestrator(
+    orchestration = await orchestrator_client.run_career_workflow(
         TaskRequest(
             user_id_hash=user.user_id,
             intent="career_readiness_workflow",
@@ -330,6 +332,7 @@ async def _chat_event_stream(request: ChatRequest, user: UserContext) -> AsyncIt
         duration_ms=int((perf_counter() - stream_start) * 1000),
         job_count=len(jobs),
         user_id_hash=user.user_id,
+        orchestrator_mode="remote" if orchestrator_client.remote_enabled else "local",
     )
 
 

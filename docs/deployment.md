@@ -13,6 +13,7 @@ This repository is ready for Google Cloud deployment planning, but no deployment
 - whether agents are public, internal-only, or behind API Gateway
 - Firebase project and web config
 - USAJOBS API email and key
+- whether `web-api` should call local orchestrator logic or deployed `ORCHESTRATOR_URL`
 
 ## Build Pattern
 
@@ -66,8 +67,9 @@ The Terraform template creates:
 
 - Artifact Registry repository
 - Pub/Sub remediation topic
-- shared starter service account
+- one shared agent runtime service account
 - Cloud Run services for each agent
+- common Secret Manager access for `SKILLBRIDGE_AGENT_TOKEN`
 
 The image references are placeholders until the build pipeline is finalized.
 
@@ -76,3 +78,14 @@ The image references are placeholders until the build pipeline is finalized.
 For the first deployment, provide `AGENT_REGISTRY_JSON` to the orchestrator with the deployed
 Agent Cards for specialist services. Later, replace this with a small registry service backed by
 Firestore.
+
+For a separate-agent architecture demo, set:
+
+```text
+ORCHESTRATOR_URL=https://skillbridge-orchestrator-agent-...run.app
+AGENT_REGISTRY_JSON=[...deployed specialist Agent Cards...]
+SKILLBRIDGE_AGENT_TOKEN=stored in Secret Manager
+```
+
+If `ORCHESTRATOR_URL` is empty, `web-api` uses the in-process orchestrator fallback for the cheapest
+two-service demo.

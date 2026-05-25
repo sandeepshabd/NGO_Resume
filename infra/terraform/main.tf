@@ -42,6 +42,12 @@ resource "google_project_iam_member" "agent_metric_writer" {
   member  = "serviceAccount:${google_service_account.agent.email}"
 }
 
+resource "google_project_iam_member" "agent_secret_accessor" {
+  project = var.project_id
+  role    = "roles/secretmanager.secretAccessor"
+  member  = "serviceAccount:${google_service_account.agent.email}"
+}
+
 locals {
   agents = {
     orchestrator       = "agents.orchestrator.main"
@@ -77,6 +83,31 @@ resource "google_cloud_run_v2_service" "agents" {
       env {
         name  = "PUBSUB_REMEDIATION_TOPIC"
         value = google_pubsub_topic.remediation_events.name
+      }
+
+      env {
+        name  = "AGENT_REGISTRY_JSON"
+        value = var.agent_registry_json
+      }
+
+      env {
+        name  = "ORCHESTRATOR_URL"
+        value = var.orchestrator_url
+      }
+
+      env {
+        name  = "CORS_ALLOW_ORIGINS"
+        value = var.cors_allow_origins
+      }
+
+      env {
+        name = "SKILLBRIDGE_AGENT_TOKEN"
+        value_source {
+          secret_key_ref {
+            secret  = var.agent_token_secret_id
+            version = "latest"
+          }
+        }
       }
     }
   }
