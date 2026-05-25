@@ -217,11 +217,14 @@ export WEB_API_URL="$(gcloud run services describe skillbridge-web-api-agent \
 ```bash
 cd apps/web
 
+cat > .env.production <<EOF
+NEXT_PUBLIC_API_BASE_URL=${WEB_API_URL}
+EOF
+
 gcloud run deploy skillbridge-web \
   --source . \
   --region "${REGION}" \
   --allow-unauthenticated \
-  --set-env-vars "NEXT_PUBLIC_API_BASE_URL=${WEB_API_URL}" \
   --memory 512Mi \
   --cpu 1 \
   --min-instances 0 \

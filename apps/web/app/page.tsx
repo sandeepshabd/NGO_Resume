@@ -68,7 +68,17 @@ const emptyDashboard: Dashboard = {
   chat_history: []
 };
 
-const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "http://localhost:8081";
+const configuredApiBase = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+
+function getApiBase() {
+  if (configuredApiBase) {
+    return configuredApiBase;
+  }
+  if (typeof window !== "undefined" && window.location.hostname === "localhost") {
+    return "http://localhost:8081";
+  }
+  return "";
+}
 
 export default function Home() {
   const [token, setToken] = useState("demo-user");
@@ -94,8 +104,23 @@ export default function Home() {
   const [events, setEvents] = useState<StatusEvent[]>([]);
 
   const authHeader = useMemo(() => ({ Authorization: `Bearer ${token}` }), [token]);
+  const apiBase = getApiBase();
+
+  function requireApiBase() {
+    if (apiBase) {
+      return true;
+    }
+    const detail =
+      "Frontend API URL is not configured. Rebuild with NEXT_PUBLIC_API_BASE_URL set to the deployed web-api URL.";
+    setStatus(detail);
+    addDiagnostic("Configuration", "error", detail);
+    return false;
+  }
 
   async function demoLogin() {
+    if (!requireApiBase()) {
+      return;
+    }
     setDiagnostics((current) => [
       { label: "Demo login", status: "pending", detail: "Calling /auth/demo-login" },
       ...current
@@ -117,6 +142,9 @@ export default function Home() {
   }
 
   async function uploadResume(): Promise<boolean> {
+    if (!requireApiBase()) {
+      return false;
+    }
     if (!resumeText.trim()) {
       const detail = "Paste resume text before uploading.";
       setUploadStatus({ label: "Resume upload", status: "error", detail });
@@ -156,6 +184,9 @@ export default function Home() {
   }
 
   async function sendChat() {
+    if (!requireApiBase()) {
+      return;
+    }
     if (isChatting) {
       return;
     }
